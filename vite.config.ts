@@ -4,7 +4,6 @@ import { VitePWA, VitePWAOptions } from 'vite-plugin-pwa';
 import * as path from 'path';
 
 export default defineConfig({
-  base: './',
   plugins: [react()],
   server: {
     watch: {

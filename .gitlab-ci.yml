@@ -1,0 +1,143 @@
+stages: # List of stages for jobs, and their order of execution
+  - build
+  - test
+  - build-image
+  - deploy
+
+variables:
+  IMAGE_NAME: ps-datawhs-ui
+  REGISTRY_URL: registry.gitlab.com/planet-surf/data-warehouse3/dw-front-react/$IMAGE_NAME
+  TAG_IMAGE: $CI_COMMIT_BRANCH-$CI_COMMIT_SHA
+
+cache:
+  paths:
+    - node_modules/
+
+build-job:
+  stage: build
+  image: node:18-alpine
+  before_script:
+    - echo "Installing dependencies..."
+    - yarn install
+  script:
+    - echo "Building app..."
+    - yarn build
+  artifacts:
+    paths:
+      - node_modules/
+    untracked: false
+    expire_in: 2 days
+  tags:
+    - test
+  rules:
+    # pipeline should run on merge request to main branch
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == 'main'
+
+unit-test-job:
+  stage: test
+  image: node:18-alpine
+  before_script:
+    - echo "Installing dependencies..."
+    - yarn install
+  script:
+    - echo "Testing app..."
+    - yarn test
+  tags:
+    - test
+  rules:
+    # pipeline should run on merge request to main branch
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == 'main'
+
+build-image-staging-job:
+  stage: build-image
+  environment: staging
+  image: docker:20.10.16
+  services:
+    - name: docker:20.10.16-dind
+      alias: docker
+  variables:
+    DOCKER_TLS_CERTDIR: '/certs'
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - echo "Building image..."
+    - docker build -t $IMAGE_NAME:stag --build-arg BACKEND_URL=$BASE_URL .
+    - echo "Tagging image..."
+    - docker tag $IMAGE_NAME:stag $REGISTRY_URL:stag
+    - echo "Pushing image..."
+    - docker push $REGISTRY_URL:stag
+    - echo "Remove dangling images..."
+    - docker image prune -f
+  #artifacts:
+  #  paths:
+  #    - node_modules/
+  #  untracked: false
+  #  expire_in: 2 days
+  tags:
+    - build
+  only:
+    - main
+
+build-image-production-job:
+  stage: build-image
+  environment: production
+  image: docker:20.10.16
+  services:
+    - name: docker:20.10.16-dind
+      alias: docker
+  variables:
+    DOCKER_TLS_CERTDIR: '/certs'
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - echo "Building image..."
+    - docker build -t $IMAGE_NAME:latest --build-arg BACKEND_URL=$BASE_URL .
+    - echo "Tagging image..."
+    - docker tag $IMAGE_NAME:latest $REGISTRY_URL:latest
+    - echo "Pushing image..."
+    - docker push $REGISTRY_URL:latest
+    - echo "Remove dangling images..."
+    - docker image prune -f
+  #artifacts:
+  #  paths:
+  #    - node_modules/
+  #  untracked: false
+  #  expire_in: 2 days
+  tags:
+    - build
+  only:
+    - production      
+
+deploy-staging:
+  stage: deploy
+  environment: staging
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker stop $IMAGE_NAME || true && docker rm $IMAGE_NAME || true
+    - docker image rm $REGISTRY_URL:stag || true
+    - docker run -d --restart unless-stopped 
+      --name $IMAGE_NAME 
+      -p $PORT:$PORT
+      $REGISTRY_URL:stag
+  tags:
+    - staging
+  only:
+    - main
+
+deploy-production:
+  stage: deploy
+  environment: production
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker stop $IMAGE_NAME || true && docker rm $IMAGE_NAME || true
+    - docker image rm $REGISTRY_URL || true
+    - docker run -d --restart unless-stopped 
+      --name $IMAGE_NAME 
+      -p $PORT:$PORT
+      $REGISTRY_URL
+  tags:
+    - production
+  only:
+    - production

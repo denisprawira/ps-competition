@@ -1,4 +1,3 @@
-import pslogo from '@/assets/pslogo.png';
 import { ErrorBoundary } from 'react-error-boundary';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
